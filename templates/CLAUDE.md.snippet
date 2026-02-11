@@ -46,6 +46,18 @@ SURVEY → SPECIFY → CONSTRUCT → FORMALIZE → PROVE → AUDIT → LOG
 ### LOG (commit + PR)
 - Commit results, create PR, archive
 
+## Phase Output (Disk-Only Logging)
+
+All `./math.sh` phase commands return **only** a compact summary on stdout: the last agent message (≤500 chars), exit code, and log path. Full output — including `lake build` errors, tactic state, and type mismatches — goes to `/tmp/math-{phase}.log`. If a phase fails or you need more detail, read the log:
+
+```bash
+# Examples:
+cat /tmp/math-prove.log     # Full prove phase transcript
+cat /tmp/math-formalize.log # Full formalize phase transcript
+```
+
+This prevents verbose Lean4 output from flooding the orchestrator's context window.
+
 ## Universal Rules
 - **NEVER** use `axiom`, `unsafe`, `native_decide`, or `admit`
 - **NEVER** use `chmod`, `sudo`, or permission-modifying commands
