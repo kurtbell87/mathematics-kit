@@ -322,6 +322,42 @@ run_status() {
 }
 
 # ──────────────────────────────────────────────────────────────
+# Phase Summary (disk-only output)
+# ──────────────────────────────────────────────────────────────
+
+_phase_summary() {
+  # Extract the final agent message from the stream-json log and print a
+  # compact summary.  This keeps the orchestrator's context window lean —
+  # the full transcript stays on disk at /tmp/math-{phase}.log.
+  local phase="$1"
+  local exit_code="$2"
+  local log="/tmp/math-${phase}.log"
+
+  local summary
+  summary=$(tail -20 "$log" 2>/dev/null | python3 -c "
+import json, sys
+texts = []
+for line in sys.stdin:
+    try:
+        d = json.loads(line.strip())
+        if d.get('type') == 'assistant':
+            for c in d.get('message', {}).get('content', []):
+                if c.get('type') == 'text':
+                    texts.append(c['text'])
+    except Exception:
+        pass
+if texts:
+    print(texts[-1][:500])
+" 2>/dev/null)
+
+  if [[ -n "$summary" ]]; then
+    echo -e "${YELLOW}[${phase}]${NC} $summary"
+  fi
+  echo -e "${YELLOW}[${phase}]${NC} Phase complete (exit: $exit_code). Log: $log"
+  return "$exit_code"
+}
+
+# ──────────────────────────────────────────────────────────────
 # Phase Runners
 # ──────────────────────────────────────────────────────────────
 
@@ -343,6 +379,7 @@ run_survey() {
   export MATH_PHASE="survey"
   start_phase_timer
 
+  local exit_code=0
   claude \
     --output-format stream-json \
     --append-system-prompt "$(cat "$PROMPT_DIR/math-survey.md")
@@ -359,8 +396,9 @@ run_survey() {
 Read the spec file first, then survey Mathlib and existing formalizations." \
     --allowed-tools "Read,Bash,Glob,Grep" \
     -p "Read the spec file at $spec_file, then survey Mathlib and existing formalizations for this domain." \
-    2>&1 | tee /tmp/math-survey.log
+    > /tmp/math-survey.log 2>&1 || exit_code=$?
 
+  _phase_summary "survey" "$exit_code"
   end_phase_timer "survey"
 }
 
@@ -380,6 +418,7 @@ run_specify() {
   start_phase_timer
   ensure_hooks_executable
 
+  local exit_code=0
   claude \
     --output-format stream-json \
     --append-system-prompt "$(cat "$PROMPT_DIR/math-specify.md")
@@ -394,8 +433,9 @@ run_specify() {
 Write precise property requirements to $spec_file. Update DOMAIN_CONTEXT.md with Mathlib mappings." \
     --allowed-tools "Read,Write,Edit,Bash,Glob,Grep" \
     -p "Write precise mathematical property requirements to $spec_file" \
-    2>&1 | tee /tmp/math-specify.log
+    > /tmp/math-specify.log 2>&1 || exit_code=$?
 
+  _phase_summary "specify" "$exit_code"
   end_phase_timer "specify"
 }
 
@@ -418,6 +458,7 @@ run_construct() {
   start_phase_timer
   ensure_hooks_executable
 
+  local exit_code=0
   claude \
     --output-format stream-json \
     --append-system-prompt "$(cat "$PROMPT_DIR/math-construct.md")
@@ -431,8 +472,9 @@ run_construct() {
 Read the spec, then write an informal construction document with definitions, theorems, and proof sketches." \
     --allowed-tools "Read,Write,Edit,Bash,Glob,Grep" \
     -p "Read the spec at $spec_file, then write a construction document with definitions, theorems, and proof sketches." \
-    2>&1 | tee /tmp/math-construct.log
+    > /tmp/math-construct.log 2>&1 || exit_code=$?
 
+  _phase_summary "construct" "$exit_code"
   end_phase_timer "construct"
 }
 
@@ -459,6 +501,7 @@ run_formalize() {
   start_phase_timer
   ensure_hooks_executable
 
+  local exit_code=0
   claude \
     --output-format stream-json \
     --append-system-prompt "$(cat "$PROMPT_DIR/math-formalize.md")
@@ -473,8 +516,9 @@ run_formalize() {
 Read the spec and construction docs, then write .lean files with ALL proof bodies as sorry. Verify with $LAKE_BUILD." \
     --allowed-tools "Read,Write,Edit,Bash,Glob,Grep" \
     -p "Read the spec and construction docs, then write Lean4 files with definitions and sorry theorems. Verify with '$LAKE_BUILD'." \
-    2>&1 | tee /tmp/math-formalize.log
+    > /tmp/math-formalize.log 2>&1 || exit_code=$?
 
+  _phase_summary "formalize" "$exit_code"
   end_phase_timer "formalize"
 }
 
@@ -518,6 +562,7 @@ run_prove() {
   # Unlock specs on exit
   trap "unlock_spec '$spec_file' 2>/dev/null || true" EXIT
 
+  local exit_code=0
   claude \
     --output-format stream-json \
     --append-system-prompt "$(cat "$PROMPT_DIR/math-prove.md")
@@ -536,8 +581,9 @@ run_prove() {
 Read the .lean files and spec. Replace sorrys with real proofs using Edit. Run '$LAKE_BUILD' after each change." \
     --allowed-tools "Read,Edit,Bash,Glob,Grep,Write" \
     -p "Fill in all sorry placeholders with real Lean4 proofs. Use Edit to replace sorry. Run '$LAKE_BUILD' after each change. Current sorry count: $sorry_count" \
-    2>&1 | tee /tmp/math-prove.log
+    > /tmp/math-prove.log 2>&1 || exit_code=$?
 
+  _phase_summary "prove" "$exit_code"
   end_phase_timer "prove"
 }
 
@@ -572,6 +618,7 @@ run_audit() {
   local axiom_count
   axiom_count=$(check_axioms)
 
+  local exit_code=0
   claude \
     --output-format stream-json \
     --append-system-prompt "$(cat "$PROMPT_DIR/math-audit.md")
@@ -588,8 +635,9 @@ run_audit() {
 Run '$LAKE_BUILD', audit all .lean files, check spec coverage. Write results to CONSTRUCTION_LOG.md." \
     --allowed-tools "Read,Write,Edit,Bash,Glob,Grep" \
     -p "Audit the formalization. Run '$LAKE_BUILD', check for sorry/axiom, verify spec coverage. Write results to CONSTRUCTION_LOG.md." \
-    2>&1 | tee /tmp/math-audit.log
+    > /tmp/math-audit.log 2>&1 || exit_code=$?
 
+  _phase_summary "audit" "$exit_code"
   end_phase_timer "audit"
 }
 

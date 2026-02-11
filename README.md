@@ -80,12 +80,35 @@ Runs all 7 phases with automatic revision loop support.
 
 Auto-advances through constructions listed in `CONSTRUCTIONS.md`. Supports dependency chains via the `Depends On` column — constructions are executed in topological order, and downstream constructions are automatically blocked when dependencies fail.
 
+### Monitoring a Running Phase
+
+Each phase streams structured JSON logs to `/tmp/math-{phase}.log`. The built-in `watch` command parses these into a live dashboard:
+
+```bash
+./math.sh watch prove               # Live-tail the prove phase
+./math.sh watch prove --resolve     # One-shot summary
+./math.sh watch prove --verbose     # Show build output (lake errors, tactic state)
+./math.sh watch                     # Auto-detect the most recent phase
+```
+
+The dashboard shows elapsed time, model, tool call counts, files read/written/edited, agent narration, and build output.
+
+Phase runners redirect all sub-agent output to disk only (`/tmp/math-{phase}.log`). Stdout receives a compact summary — the last agent message, exit code, and log path — so the orchestrator's context window stays clean. This is especially important for the mathematics kit, where `lake build` output and Lean4 type errors can be extremely verbose. If you need more detail, grep or read the log file directly.
+
+#### What the Orchestrator Sees
+
+Each `./math.sh` phase returns **only** a compact summary on stdout:
+
+- **Phase output** goes to `/tmp/math-{phase}.log` (not stdout)
+- **Stdout receives:** last agent message (≤500 chars) + exit code + log path
+- **To get more detail:** grep or read the log file (pull-based)
+- **The watch script** reads logs directly and is unaffected by this
+
+This is intentional — it prevents `lake build` verbosity and Lean4 type expansion dumps from flooding the orchestrator's context window. The orchestrator should treat the summary as the primary signal and only pull from the log when diagnosing a failure.
+
 ### Utilities
 ```bash
 ./math.sh status                    # Sorry count, axiom count, build status
-./math.sh watch prove               # Live-tail the prove phase
-./math.sh watch prove --resolve     # One-shot summary
-./math.sh watch prove --verbose     # Show build output
 ```
 
 ### Aliases
