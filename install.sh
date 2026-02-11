@@ -13,6 +13,10 @@
 
 set -euo pipefail
 
+# ── Parse flags ──
+UPGRADE=false
+if [[ "${1:-}" == "--upgrade" ]]; then UPGRADE=true; shift; fi
+
 # IMPORTANT: This script NEVER runs `lake clean`. Olean caches are precious
 # with Mathlib. If the user needs a clean build, that's a manual operation.
 
@@ -32,10 +36,13 @@ TARGET_DIR="$(pwd)"
 
 echo ""
 echo -e "${BOLD}Claude Mathematics Kit -- Installer${NC}"
+if [[ "$UPGRADE" == "true" ]]; then
+  echo -e "${YELLOW}Mode: UPGRADE (machinery overwritten, config backed up, state untouched)${NC}"
+fi
 echo -e "Installing into: ${BLUE}$TARGET_DIR${NC}"
 echo ""
 
-# ── Helper: copy file if it doesn't exist ──
+# ── Helper: state files -- never touched on upgrade ──
 install_file() {
   local src="$1"
   local dest="$2"
@@ -58,6 +65,48 @@ install_executable() {
   local dest="$2"
   install_file "$src" "$dest"
   chmod +x "$dest"
+}
+
+# ── Helper: machinery files -- always overwritten on upgrade ──
+upgrade_machinery() {
+  local src="$1" dest="$2"
+  mkdir -p "$(dirname "$dest")"
+  if [[ "$UPGRADE" == "true" ]]; then
+    cp "$src" "$dest"
+    echo -e "  ${GREEN}updated:${NC} $dest"
+  elif [[ -f "$dest" ]]; then
+    echo -e "  ${YELLOW}exists:${NC}  $dest (skipped)"
+  else
+    cp "$src" "$dest"
+    echo -e "  ${GREEN}created:${NC} $dest"
+  fi
+}
+
+upgrade_machinery_executable() {
+  upgrade_machinery "$1" "$2"
+  chmod +x "$2"
+}
+
+# ── Helper: config files -- backed up + overwritten on upgrade ──
+upgrade_config() {
+  local src="$1" dest="$2"
+  mkdir -p "$(dirname "$dest")"
+  if [[ "$UPGRADE" == "true" && -f "$dest" ]]; then
+    cp "$dest" "${dest}.bak"
+    cp "$src" "$dest"
+    echo -e "  ${GREEN}updated:${NC} $dest"
+    echo -e "  ${YELLOW}backup:${NC}  ${dest}.bak (merge your config from here)"
+  elif [[ -f "$dest" ]]; then
+    echo -e "  ${YELLOW}exists:${NC}  $dest (skipped)"
+  else
+    cp "$src" "$dest"
+    echo -e "  ${GREEN}created:${NC} $dest"
+  fi
+}
+
+upgrade_config_executable() {
+  upgrade_config "$1" "$2"
+  chmod +x "$2"
 }
 
 # ──────────────────────────────────────────────────────────────
@@ -101,17 +150,17 @@ fi
 
 echo ""
 echo -e "${BOLD}Core orchestration:${NC}"
-install_executable "$KIT_DIR/math.sh"          "$TARGET_DIR/math.sh"
-install_file       "$KIT_DIR/math-aliases.sh"  "$TARGET_DIR/math-aliases.sh"
+upgrade_config_executable    "$KIT_DIR/math.sh"          "$TARGET_DIR/math.sh"
+upgrade_machinery            "$KIT_DIR/math-aliases.sh"  "$TARGET_DIR/math-aliases.sh"
 
 echo ""
 echo -e "${BOLD}Monitoring & utilities:${NC}"
-install_file "$KIT_DIR/scripts/math-watch.py" "$TARGET_DIR/scripts/math-watch.py"
-install_executable "$KIT_DIR/scripts/mathlib-search.sh"       "$TARGET_DIR/scripts/mathlib-search.sh"
-install_executable "$KIT_DIR/scripts/lean-error-classify.sh"  "$TARGET_DIR/scripts/lean-error-classify.sh"
-install_executable "$KIT_DIR/scripts/lean-error-summarize.sh" "$TARGET_DIR/scripts/lean-error-summarize.sh"
-install_executable "$KIT_DIR/scripts/lake-timed.sh"           "$TARGET_DIR/scripts/lake-timed.sh"
-install_file       "$KIT_DIR/scripts/resolve-deps.py"        "$TARGET_DIR/scripts/resolve-deps.py"
+upgrade_machinery            "$KIT_DIR/scripts/math-watch.py" "$TARGET_DIR/scripts/math-watch.py"
+upgrade_machinery_executable "$KIT_DIR/scripts/mathlib-search.sh"       "$TARGET_DIR/scripts/mathlib-search.sh"
+upgrade_machinery_executable "$KIT_DIR/scripts/lean-error-classify.sh"  "$TARGET_DIR/scripts/lean-error-classify.sh"
+upgrade_machinery_executable "$KIT_DIR/scripts/lean-error-summarize.sh" "$TARGET_DIR/scripts/lean-error-summarize.sh"
+upgrade_machinery_executable "$KIT_DIR/scripts/lake-timed.sh"           "$TARGET_DIR/scripts/lake-timed.sh"
+upgrade_machinery            "$KIT_DIR/scripts/resolve-deps.py"        "$TARGET_DIR/scripts/resolve-deps.py"
 
 # ──────────────────────────────────────────────────────────────
 # Step 3: Claude hooks & prompts
@@ -119,16 +168,18 @@ install_file       "$KIT_DIR/scripts/resolve-deps.py"        "$TARGET_DIR/script
 
 echo ""
 echo -e "${BOLD}Claude Code hooks & prompts:${NC}"
-install_executable "$KIT_DIR/.claude/hooks/pre-tool-use.sh"     "$TARGET_DIR/.claude/hooks/pre-tool-use.sh"
-install_file       "$KIT_DIR/.claude/prompts/math-survey.md"    "$TARGET_DIR/.claude/prompts/math-survey.md"
-install_file       "$KIT_DIR/.claude/prompts/math-specify.md"   "$TARGET_DIR/.claude/prompts/math-specify.md"
-install_file       "$KIT_DIR/.claude/prompts/math-construct.md" "$TARGET_DIR/.claude/prompts/math-construct.md"
-install_file       "$KIT_DIR/.claude/prompts/math-formalize.md" "$TARGET_DIR/.claude/prompts/math-formalize.md"
-install_file       "$KIT_DIR/.claude/prompts/math-prove.md"     "$TARGET_DIR/.claude/prompts/math-prove.md"
-install_file       "$KIT_DIR/.claude/prompts/math-audit.md"     "$TARGET_DIR/.claude/prompts/math-audit.md"
+upgrade_config_executable    "$KIT_DIR/.claude/hooks/pre-tool-use.sh"     "$TARGET_DIR/.claude/hooks/pre-tool-use.sh"
+upgrade_machinery            "$KIT_DIR/.claude/prompts/math-survey.md"    "$TARGET_DIR/.claude/prompts/math-survey.md"
+upgrade_machinery            "$KIT_DIR/.claude/prompts/math-specify.md"   "$TARGET_DIR/.claude/prompts/math-specify.md"
+upgrade_machinery            "$KIT_DIR/.claude/prompts/math-construct.md" "$TARGET_DIR/.claude/prompts/math-construct.md"
+upgrade_machinery            "$KIT_DIR/.claude/prompts/math-formalize.md" "$TARGET_DIR/.claude/prompts/math-formalize.md"
+upgrade_machinery            "$KIT_DIR/.claude/prompts/math-prove.md"     "$TARGET_DIR/.claude/prompts/math-prove.md"
+upgrade_machinery            "$KIT_DIR/.claude/prompts/math-audit.md"     "$TARGET_DIR/.claude/prompts/math-audit.md"
 
-# ── Settings (merge-safe) ──
-if [[ -f "$TARGET_DIR/.claude/settings.json" ]]; then
+# ── Settings (config) ──
+if [[ "$UPGRADE" == "true" ]]; then
+  upgrade_config "$KIT_DIR/.claude/settings.json" "$TARGET_DIR/.claude/settings.json"
+elif [[ -f "$TARGET_DIR/.claude/settings.json" ]]; then
   echo ""
   echo -e "  ${YELLOW}exists:${NC}  .claude/settings.json"
   echo -e "  ${YELLOW}ACTION NEEDED:${NC} Merge the hook config manually. Add this to your settings.json:"
