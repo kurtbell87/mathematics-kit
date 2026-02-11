@@ -35,3 +35,12 @@ Domain knowledge, Mathlib mappings, and notation conventions for this project.
 
 ## Known Limitations
 <!-- Things Mathlib doesn't have that we need to build ourselves -->
+
+## DOES NOT APPLY
+<!-- Record failed approaches here during PROVE phase.
+     Each entry should explain WHY the lemma/approach doesn't work.
+     This prevents future revision cycles from re-attempting known-bad approaches. -->
+<!-- Example:
+- MeasureTheory.StronglyMeasurable.integral_condexp: requires [TopologicalSpace α], our α is bare ℕ → ℝ
+- MeasureTheory.Stopping.isStoppingTime_min: only for ℕ-indexed filtrations, we need ℝ-indexed
+-->

@@ -11,6 +11,7 @@ SURVEY → SPECIFY → CONSTRUCT → FORMALIZE → PROVE → AUDIT → LOG
 ### SURVEY (read-only)
 - Read Mathlib docs, existing formalizations, spec files
 - Run `#check` / `#print` commands to explore Mathlib
+- Use `./scripts/mathlib-search.sh` for targeted Mathlib searches
 - Do NOT create or modify any files
 
 ### SPECIFY (spec files only)
@@ -31,6 +32,10 @@ SURVEY → SPECIFY → CONSTRUCT → FORMALIZE → PROVE → AUDIT → LOG
 - Replace `sorry` with real proofs
 - Do NOT modify theorem signatures or definitions
 - Spec files are READ-ONLY
+- Use `./scripts/lean-error-classify.sh` to classify build errors
+- Use `./scripts/lean-error-summarize.sh` for condensed error output
+- Record failed approaches in DOMAIN_CONTEXT.md under `## DOES NOT APPLY`
+- Generate MWEs in `scratch/MWE.lean` for opaque errors
 - Create `REVISION.md` if construction is unprovable
 
 ### AUDIT (read-only for .lean)
@@ -54,6 +59,12 @@ After each significant action, update CONSTRUCTION_LOG.md with progress notes.
 - `math.sh` — orchestrator (run phases, check status)
 - `specs/` — specification and construction documents
 - `results/` — archived construction results
-- `DOMAIN_CONTEXT.md` — Mathlib mappings and domain knowledge
+- `DOMAIN_CONTEXT.md` — Mathlib mappings, domain knowledge, and negative knowledge (DOES NOT APPLY)
 - `CONSTRUCTION_LOG.md` — audit trail
-- `CONSTRUCTIONS.md` — program-mode construction queue
+- `CONSTRUCTIONS.md` — program-mode construction queue (with dependency chains)
+
+## Utility Scripts
+- `scripts/mathlib-search.sh` — search Mathlib source for defs/thms/instances
+- `scripts/lean-error-classify.sh` — classify Lean4 errors (TYPE_MISMATCH, UNKNOWN_IDENT, etc.)
+- `scripts/lean-error-summarize.sh` — condense Lean4 errors for agent consumption
+- `scripts/lake-timed.sh` — `lake` wrapper that records build timing

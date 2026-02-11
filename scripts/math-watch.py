@@ -85,6 +85,12 @@ class AgentState:
         self.theorems_proved = []   # list of theorem names
         self.sorry_removals = 0     # count of sorry -> proof edits
 
+        # R4/R2: Revision and timing tracking
+        self.revision_cycles = 0
+        self.error_classes = []     # list of classified errors
+        self.lake_build_total_seconds = 0
+        self.agent_think_total_seconds = 0
+
     @property
     def elapsed(self) -> str:
         if not self.start_time:
@@ -134,6 +140,11 @@ def process_banner_line(line: str, state: AgentState):
         if state.sorry_initial is None:
             state.sorry_initial = count
         state.sorry_current = count
+
+    # Detect revision cycles
+    m = re.search(r'REVISION\s+(\d+)/(\d+)', plain)
+    if m:
+        state.revision_cycles = int(m.group(1))
 
 
 def process_event(data: dict, state: AgentState, verbose: bool = False) -> list:
@@ -376,6 +387,9 @@ def print_header(state: AgentState):
 
     if state.sorry_removals:
         bar += f" {DIM}│{RESET} {GREEN}✅{state.sorry_removals} proved{RESET}"
+
+    if state.revision_cycles:
+        bar += f" {DIM}│{RESET} {YELLOW}rev:{state.revision_cycles}{RESET}"
 
     print(f"\n{bar}")
     print(f"  {DIM}{'─' * 100}{RESET}")

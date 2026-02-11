@@ -13,6 +13,9 @@
 
 set -euo pipefail
 
+# IMPORTANT: This script NEVER runs `lake clean`. Olean caches are precious
+# with Mathlib. If the user needs a clean build, that's a manual operation.
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -102,8 +105,13 @@ install_executable "$KIT_DIR/math.sh"          "$TARGET_DIR/math.sh"
 install_file       "$KIT_DIR/math-aliases.sh"  "$TARGET_DIR/math-aliases.sh"
 
 echo ""
-echo -e "${BOLD}Monitoring:${NC}"
+echo -e "${BOLD}Monitoring & utilities:${NC}"
 install_file "$KIT_DIR/scripts/math-watch.py" "$TARGET_DIR/scripts/math-watch.py"
+install_executable "$KIT_DIR/scripts/mathlib-search.sh"       "$TARGET_DIR/scripts/mathlib-search.sh"
+install_executable "$KIT_DIR/scripts/lean-error-classify.sh"  "$TARGET_DIR/scripts/lean-error-classify.sh"
+install_executable "$KIT_DIR/scripts/lean-error-summarize.sh" "$TARGET_DIR/scripts/lean-error-summarize.sh"
+install_executable "$KIT_DIR/scripts/lake-timed.sh"           "$TARGET_DIR/scripts/lake-timed.sh"
+install_file       "$KIT_DIR/scripts/resolve-deps.py"        "$TARGET_DIR/scripts/resolve-deps.py"
 
 # ──────────────────────────────────────────────────────────────
 # Step 3: Claude hooks & prompts
@@ -233,7 +241,69 @@ else
   fi
 fi
 
-# ── Update Mathlib (if lake available) ──
+# ── Mathlib cache setup ──
+
+setup_mathlib_cache() {
+  # R3.1: Detect Mathlib dependency (case-insensitive)
+  local HAS_MATHLIB=false
+  if grep -qi "mathlib" "$TARGET_DIR/lakefile.lean" 2>/dev/null || \
+     grep -qi "mathlib" "$TARGET_DIR/lakefile.toml" 2>/dev/null; then
+    HAS_MATHLIB=true
+  fi
+
+  if [[ "$HAS_MATHLIB" == "true" ]]; then
+    echo -e "  ${GREEN}found:${NC}   Mathlib dependency"
+
+    # R3.3a: Toolchain version match check
+    local project_tc="" mathlib_tc=""
+    if [[ -f "$TARGET_DIR/lean-toolchain" ]]; then
+      project_tc=$(cat "$TARGET_DIR/lean-toolchain" | tr -d '[:space:]')
+    fi
+
+    local mathlib_tc_path=""
+    if [[ -f "$TARGET_DIR/.lake/packages/mathlib/lean-toolchain" ]]; then
+      mathlib_tc_path="$TARGET_DIR/.lake/packages/mathlib/lean-toolchain"
+    elif [[ -f "$TARGET_DIR/lake-packages/mathlib/lean-toolchain" ]]; then
+      mathlib_tc_path="$TARGET_DIR/lake-packages/mathlib/lean-toolchain"
+    fi
+
+    if [[ -n "$mathlib_tc_path" ]]; then
+      mathlib_tc=$(cat "$mathlib_tc_path" | tr -d '[:space:]')
+      if [[ -n "$project_tc" && -n "$mathlib_tc" && "$project_tc" != "$mathlib_tc" ]]; then
+        echo ""
+        echo -e "  ${RED}ERROR: Toolchain mismatch detected.${NC}"
+        echo -e "    Project:  $project_tc"
+        echo -e "    Mathlib:  $mathlib_tc"
+        echo ""
+        echo -e "  Mathlib pins its toolchain version. Update your lean-toolchain to match:"
+        echo -e "    cp $mathlib_tc_path ./lean-toolchain"
+        echo -e "  Then re-run install.sh."
+        exit 1
+      fi
+    fi
+
+    # R3.3: Fetch precompiled oleans
+    echo -e "  Fetching Mathlib precompiled oleans..."
+    if lake exe cache get 2>&1; then
+      echo -e "  ${GREEN}done:${NC}    lake exe cache get"
+    else
+      echo -e "  ${YELLOW}WARNING: lake exe cache get failed. Falling back to full build.${NC}"
+      echo -e "  ${YELLOW}This will take 20-40 minutes.${NC}"
+    fi
+  fi
+
+  # R3.2: Build once to populate cache
+  echo ""
+  echo -e "  Building Lean4 project (populating olean cache)..."
+  echo -e "  This is a one-time cost. Subsequent builds will be incremental."
+  if lake build 2>&1; then
+    echo -e "  ${GREEN}done:${NC}    lake build succeeds"
+  else
+    echo -e "  ${YELLOW}warning:${NC} lake build had issues (check your lakefile configuration)"
+  fi
+}
+
+# ── Update and build (if lake available) ──
 if [[ "$HAVE_LAKE" == "true" ]]; then
   echo ""
   echo -e "${BOLD}Fetching dependencies:${NC}"
@@ -245,14 +315,9 @@ if [[ "$HAVE_LAKE" == "true" ]]; then
     echo -e "  ${YELLOW}warning:${NC} lake update had issues (you may need to run it manually)"
   fi
 
-  # ── Verify build ──
   echo ""
-  echo -e "  Running ${BOLD}lake build${NC} to verify..."
-  if lake build 2>&1; then
-    echo -e "  ${GREEN}done:${NC}    lake build succeeds"
-  else
-    echo -e "  ${YELLOW}warning:${NC} lake build had issues (check your lakefile configuration)"
-  fi
+  echo -e "${BOLD}Build setup:${NC}"
+  setup_mathlib_cache
 fi
 
 # ──────────────────────────────────────────────────────────────

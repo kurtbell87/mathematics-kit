@@ -59,6 +59,38 @@ BOLD='\033[1m'
 # Helpers
 # ──────────────────────────────────────────────────────────────
 
+# ── Phase timing (R4) ──
+
+phase_start_time=""
+
+start_phase_timer() {
+  phase_start_time=$(date +%s)
+}
+
+end_phase_timer() {
+  local phase_name="$1"
+  if [[ -z "$phase_start_time" ]]; then return; fi
+  local end_time
+  end_time=$(date +%s)
+  local elapsed=$((end_time - phase_start_time))
+  echo -e "${CYAN}Phase $phase_name completed in ${elapsed}s${NC}"
+
+  # Append to metrics file
+  local metrics_file="${RESULTS_DIR}/metrics.jsonl"
+  mkdir -p "$RESULTS_DIR"
+  echo "{\"phase\":\"$phase_name\",\"elapsed_seconds\":$elapsed,\"timestamp\":\"$(date -Iseconds)\"}" >> "$metrics_file"
+}
+
+validate_build_env() {
+  # R3.5: Verify lake can resolve paths before attempting builds
+  if ! lake env printPaths >/dev/null 2>&1; then
+    echo -e "${RED}Error: 'lake env printPaths' failed.${NC}" >&2
+    echo -e "The Lean4 toolchain may be misconfigured." >&2
+    echo -e "Try: elan default leanprover/lean4:stable" >&2
+    return 1
+  fi
+}
+
 find_lean_files() {
   find "$LEAN_DIR" -type f -name "*.lean" \
     ! -path "*/.lake/*" \
@@ -128,10 +160,14 @@ lock_spec() {
       echo -e "   ${YELLOW}locked:${NC} $f"
     fi
   done
-  # Lock DOMAIN_CONTEXT.md
-  if [[ -f "DOMAIN_CONTEXT.md" ]]; then
+  # R6.5: DOMAIN_CONTEXT.md is NOT locked during PROVE.
+  # The prover may append negative knowledge to the "DOES NOT APPLY" section.
+  # Hook enforcement prevents modification of other sections.
+  if [[ "${MATH_PHASE:-}" != "prove" ]] && [[ -f "DOMAIN_CONTEXT.md" ]]; then
     chmod 444 "DOMAIN_CONTEXT.md"
     echo -e "   ${YELLOW}locked:${NC} DOMAIN_CONTEXT.md"
+  elif [[ -f "DOMAIN_CONTEXT.md" ]]; then
+    echo -e "   ${BLUE}unlocked:${NC} DOMAIN_CONTEXT.md (append-only for DOES NOT APPLY)"
   fi
 }
 
@@ -150,7 +186,7 @@ unlock_spec() {
     fi
   done
   if [[ -f "DOMAIN_CONTEXT.md" ]]; then
-    chmod 644 "DOMAIN_CONTEXT.md"
+    chmod 644 "DOMAIN_CONTEXT.md" 2>/dev/null || true
     echo -e "   ${BLUE}unlocked:${NC} DOMAIN_CONTEXT.md"
   fi
 }
@@ -305,6 +341,7 @@ run_survey() {
   echo ""
 
   export MATH_PHASE="survey"
+  start_phase_timer
 
   claude \
     --output-format stream-json \
@@ -316,11 +353,15 @@ run_survey() {
 - Build command: $LAKE_BUILD
 - Existing .lean files: $(find_lean_files | tr '\n' ', ' || echo 'none')
 - Domain context: DOMAIN_CONTEXT.md
+- Mathlib source: $(find .lake/packages/mathlib/Mathlib -maxdepth 0 -type d 2>/dev/null || find lake-packages/mathlib/Mathlib -maxdepth 0 -type d 2>/dev/null || echo 'not found')
+- Mathlib search: ./scripts/mathlib-search.sh (use for targeted searches)
 
 Read the spec file first, then survey Mathlib and existing formalizations." \
     --allowed-tools "Read,Bash,Glob,Grep" \
     -p "Read the spec file at $spec_file, then survey Mathlib and existing formalizations for this domain." \
     2>&1 | tee /tmp/math-survey.log
+
+  end_phase_timer "survey"
 }
 
 run_specify() {
@@ -336,6 +377,7 @@ run_specify() {
   mkdir -p "$SPEC_DIR"
 
   export MATH_PHASE="specify"
+  start_phase_timer
   ensure_hooks_executable
 
   claude \
@@ -353,6 +395,8 @@ Write precise property requirements to $spec_file. Update DOMAIN_CONTEXT.md with
     --allowed-tools "Read,Write,Edit,Bash,Glob,Grep" \
     -p "Write precise mathematical property requirements to $spec_file" \
     2>&1 | tee /tmp/math-specify.log
+
+  end_phase_timer "specify"
 }
 
 run_construct() {
@@ -371,6 +415,7 @@ run_construct() {
   echo ""
 
   export MATH_PHASE="construct"
+  start_phase_timer
   ensure_hooks_executable
 
   claude \
@@ -387,6 +432,8 @@ Read the spec, then write an informal construction document with definitions, th
     --allowed-tools "Read,Write,Edit,Bash,Glob,Grep" \
     -p "Read the spec at $spec_file, then write a construction document with definitions, theorems, and proof sketches." \
     2>&1 | tee /tmp/math-construct.log
+
+  end_phase_timer "construct"
 }
 
 run_formalize() {
@@ -397,6 +444,9 @@ run_formalize() {
     exit 1
   fi
 
+  # R3.5: Validate build environment before agent starts
+  validate_build_env || exit 1
+
   echo ""
   echo -e "${YELLOW}======================================================${NC}"
   echo -e "${YELLOW}  FORMALIZE PHASE -- Lean4 Definitions + Sorry Theorems${NC}"
@@ -406,6 +456,7 @@ run_formalize() {
   echo ""
 
   export MATH_PHASE="formalize"
+  start_phase_timer
   ensure_hooks_executable
 
   claude \
@@ -423,6 +474,8 @@ Read the spec and construction docs, then write .lean files with ALL proof bodie
     --allowed-tools "Read,Write,Edit,Bash,Glob,Grep" \
     -p "Read the spec and construction docs, then write Lean4 files with definitions and sorry theorems. Verify with '$LAKE_BUILD'." \
     2>&1 | tee /tmp/math-formalize.log
+
+  end_phase_timer "formalize"
 }
 
 run_prove() {
@@ -432,6 +485,9 @@ run_prove() {
     echo -e "${RED}Error: Spec file not found: $spec_file${NC}" >&2
     exit 1
   fi
+
+  # R3.5: Validate build environment before agent starts
+  validate_build_env || exit 1
 
   local lean_count
   lean_count=$(find_lean_files | wc -l | tr -d ' ')
@@ -457,6 +513,7 @@ run_prove() {
   ensure_hooks_executable
 
   export MATH_PHASE="prove"
+  start_phase_timer
 
   # Unlock specs on exit
   trap "unlock_spec '$spec_file' 2>/dev/null || true" EXIT
@@ -468,8 +525,11 @@ run_prove() {
 ## Context
 - Spec file: $spec_file (READ-ONLY -- OS-enforced, do not modify)
 - Construction docs: $(find "$SPEC_DIR" -name "construction-*" -type f 2>/dev/null | tr '\n' ', ' || echo 'none')
-- Domain context: DOMAIN_CONTEXT.md (READ-ONLY)
+- Domain context: DOMAIN_CONTEXT.md (append-only: you may add to the DOES NOT APPLY section)
 - Build command: $LAKE_BUILD
+- Error classifier: ./scripts/lean-error-classify.sh (pipe lake build stderr through it)
+- Error summarizer: ./scripts/lean-error-summarize.sh (pipe lake build stderr through it)
+- Lake timed build: ./scripts/lake-timed.sh build (records build timing)
 - Current sorry count: $sorry_count
 - .lean files: $(find_lean_files | tr '\n' ', ')
 
@@ -477,6 +537,8 @@ Read the .lean files and spec. Replace sorrys with real proofs using Edit. Run '
     --allowed-tools "Read,Edit,Bash,Glob,Grep,Write" \
     -p "Fill in all sorry placeholders with real Lean4 proofs. Use Edit to replace sorry. Run '$LAKE_BUILD' after each change. Current sorry count: $sorry_count" \
     2>&1 | tee /tmp/math-prove.log
+
+  end_phase_timer "prove"
 }
 
 run_audit() {
@@ -500,6 +562,7 @@ run_audit() {
   ensure_hooks_executable
 
   export MATH_PHASE="audit"
+  start_phase_timer
 
   # Unlock on exit
   trap "unlock_all 2>/dev/null || true" EXIT
@@ -526,6 +589,8 @@ Run '$LAKE_BUILD', audit all .lean files, check spec coverage. Write results to 
     --allowed-tools "Read,Write,Edit,Bash,Glob,Grep" \
     -p "Audit the formalization. Run '$LAKE_BUILD', check for sorry/axiom, verify spec coverage. Write results to CONSTRUCTION_LOG.md." \
     2>&1 | tee /tmp/math-audit.log
+
+  end_phase_timer "audit"
 }
 
 run_log() {
@@ -632,6 +697,11 @@ run_full() {
   local spec_file="${1:?Usage: math.sh full <spec-file>}"
   local revision_count=0
 
+  # R2.5: Initialize revision metrics
+  local revision_log="${RESULTS_DIR}/revision-metrics.json"
+  mkdir -p "$RESULTS_DIR"
+  echo '{"revisions":[]}' > "$revision_log"
+
   echo -e "${BOLD}Running full construction cycle: SURVEY -> SPECIFY -> CONSTRUCT -> FORMALIZE -> PROVE -> AUDIT -> LOG${NC}"
   echo ""
 
@@ -676,6 +746,23 @@ run_full() {
       echo -e "\n${YELLOW}======================================================${NC}"
       echo -e "${YELLOW}  REVISION $revision_count/$MAX_REVISIONS -- Restarting from $restart_from${NC}"
       echo -e "${YELLOW}======================================================${NC}\n"
+
+      # R2.5: Record revision metrics
+      python3 -c "
+import json, datetime
+try:
+    with open('$revision_log') as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {'revisions': []}
+data['revisions'].append({
+    'cycle': $revision_count,
+    'restart_from': '$restart_from',
+    'timestamp': datetime.datetime.now().isoformat(),
+})
+with open('$revision_log', 'w') as f:
+    json.dump(data, f, indent=2)
+" 2>/dev/null || true
 
       # Archive the revision
       mkdir -p "$RESULTS_DIR/revisions"
@@ -722,6 +809,54 @@ run_full() {
     echo -e "${BOLD}${GREEN}  Revisions: $revision_count${NC}"
   fi
   echo -e "${BOLD}${GREEN}======================================================${NC}"
+
+  # R4.2: Print final metrics summary
+  print_final_metrics
+}
+
+print_final_metrics() {
+  local metrics_file="${RESULTS_DIR}/metrics.jsonl"
+  if [[ ! -f "$metrics_file" ]]; then return; fi
+
+  echo ""
+  echo -e "${BOLD}Pipeline Metrics${NC}"
+  echo "┌──────────────┬──────────┬───────────────────────────────┐"
+  echo "│ Phase        │ Duration │ Timestamp                     │"
+  echo "├──────────────┼──────────┼───────────────────────────────┤"
+  python3 -c "
+import json
+with open('$metrics_file') as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        d = json.loads(line)
+        phase = d['phase'].upper().ljust(12)
+        elapsed = f\"{d['elapsed_seconds']}s\".rjust(8)
+        ts = d.get('timestamp', '').ljust(29)
+        print(f'│ {phase} │ {elapsed} │ {ts} │')
+" 2>/dev/null
+  echo "└──────────────┴──────────┴───────────────────────────────┘"
+
+  # Also print lake build timing if available
+  local lake_timing="${RESULTS_DIR}/lake-timing.jsonl"
+  if [[ -f "$lake_timing" ]]; then
+    local total_lake
+    total_lake=$(python3 -c "
+import json
+total = 0
+with open('$lake_timing') as f:
+    for line in f:
+        line = line.strip()
+        if not line: continue
+        d = json.loads(line)
+        total += d.get('lake_build_seconds', 0)
+print(total)
+" 2>/dev/null)
+    if [[ -n "$total_lake" && "$total_lake" != "0" ]]; then
+      echo -e "  Total lake build time: ${BOLD}${total_lake}s${NC}"
+    fi
+  fi
 }
 
 # ──────────────────────────────────────────────────────────────
@@ -729,31 +864,113 @@ run_full() {
 # ──────────────────────────────────────────────────────────────
 
 select_next_construction() {
-  # Parse CONSTRUCTIONS.md for the highest-priority non-completed construction
-  python3 -c "
-import re, sys
+  # R5.2: Use topological sort to select the next non-blocked construction
+  local result
+  result=$(python3 scripts/resolve-deps.py "$CONSTRUCTIONS_FILE" --next 2>/dev/null) || return 0
+  if [[ -z "$result" ]]; then
+    return 0
+  fi
+  # Parse JSON output
+  local spec_file construction status
+  spec_file=$(echo "$result" | python3 -c "import json,sys; print(json.load(sys.stdin)['spec'])")
+  construction=$(echo "$result" | python3 -c "import json,sys; print(json.load(sys.stdin)['name'])")
+  status=$(echo "$result" | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])")
+  echo "${spec_file}|${construction}|${status}"
+}
 
-try:
-    with open('$CONSTRUCTIONS_FILE') as f:
-        content = f.read()
-except FileNotFoundError:
-    sys.exit(1)
+resolve_construction_order() {
+  # R5.2: Get all actionable constructions in dependency order
+  python3 scripts/resolve-deps.py "$CONSTRUCTIONS_FILE" 2>/dev/null
+}
+
+register_proved_theorem() {
+  # R5.3: After audit passes, record proved theorem imports in DOMAIN_CONTEXT.md
+  local spec_file="$1"
+  local cid
+  cid="$(construction_id_from_spec "$spec_file")"
+
+  local lean_files
+  lean_files=$(find_lean_files | grep -i "$cid" || true)
+
+  if [[ -n "$lean_files" ]]; then
+    echo "" >> DOMAIN_CONTEXT.md
+    echo "### Proved: $cid" >> DOMAIN_CONTEXT.md
+    echo "Import with:" >> DOMAIN_CONTEXT.md
+    while IFS= read -r f; do
+      local import_path
+      import_path=$(echo "$f" | sed 's|/|.|g' | sed 's|\.lean$||' | sed 's|^\./||')
+      echo "  \`import $import_path\`" >> DOMAIN_CONTEXT.md
+    done <<< "$lean_files"
+  fi
+}
+
+mark_downstream_blocked() {
+  # R5.4: Mark all downstream dependents of a failed construction as Blocked
+  local spec_file="$1"
+  local cid
+  cid="$(construction_id_from_spec "$spec_file")"
+
+  # Find the priority for this spec_file
+  local priority
+  priority=$(grep -oP 'P\d+(?=.*'"$spec_file"')' "$CONSTRUCTIONS_FILE" 2>/dev/null | head -1)
+  if [[ -z "$priority" ]]; then
+    return 0
+  fi
+
+  local blocked_json
+  blocked_json=$(python3 scripts/resolve-deps.py "$CONSTRUCTIONS_FILE" --mark-blocked "$priority" 2>/dev/null) || return 0
+
+  local blocked_list
+  blocked_list=$(echo "$blocked_json" | python3 -c "import json,sys; [print(p) for p in json.load(sys.stdin).get('blocked',[])]" 2>/dev/null) || return 0
+
+  while IFS= read -r bp; do
+    if [[ -n "$bp" ]]; then
+      # Find the spec_file for this priority and mark it blocked
+      local bspec
+      bspec=$(python3 -c "
+import re
+with open('$CONSTRUCTIONS_FILE') as f:
+    for line in f:
+        cells = [c.strip() for c in line.split('|')]
+        cells = [c for c in cells if c]
+        if len(cells) >= 3 and cells[0] == '$bp':
+            print(cells[2].strip('\`'))
+            break
+" 2>/dev/null)
+      if [[ -n "$bspec" ]]; then
+        update_construction_status "$bspec" "Blocked"
+        echo -e "  ${YELLOW}blocked:${NC} $bp ($bspec) — dependency failed"
+      fi
+    fi
+  done <<< "$blocked_list"
+}
+
+reset_failed_constructions() {
+  # R5.5: Reset FAILED/BLOCKED entries to "Not started" for resume
+  # Preserves negative knowledge in DOMAIN_CONTEXT.md
+  python3 -c "
+import re
+
+with open('$CONSTRUCTIONS_FILE') as f:
+    content = f.read()
 
 lines = content.split('\n')
+updated = []
 for line in lines:
-    cells = [c.strip() for c in line.split('|')]
-    cells = [c for c in cells if c]
-    if len(cells) < 4:
-        continue
-    priority = cells[0]
-    if not re.match(r'^P\d+$', priority):
-        continue
-    construction = cells[1].strip('_')
-    spec_file = cells[2].strip('\`')
-    status = cells[3].lower()
-    if status in ('not started', 'specified', 'constructed', 'revision'):
-        print(f'{spec_file}|{construction}|{status}')
-        break
+    cells = line.split('|')
+    modified = False
+    for i, cell in enumerate(cells):
+        stripped = cell.strip().lower()
+        if stripped in ('blocked', 'failed'):
+            cells[i] = ' Not started '
+            modified = True
+            break
+    if modified:
+        line = '|'.join(cells)
+    updated.append(line)
+
+with open('$CONSTRUCTIONS_FILE', 'w') as f:
+    f.write('\n'.join(updated))
 " 2>/dev/null || true
 }
 
@@ -790,14 +1007,23 @@ with open('$CONSTRUCTIONS_FILE', 'w') as f:
 
 run_program() {
   local max_cycles="$MAX_PROGRAM_CYCLES"
+  local resume=false
 
   # Parse arguments
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --max-cycles) max_cycles="$2"; shift 2 ;;
+      --resume)     resume=true; shift ;;
       *)            echo -e "${RED}Unknown argument: $1${NC}" >&2; return 1 ;;
     esac
   done
+
+  # R5.5: Resume from first FAILED/BLOCKED construction
+  if $resume; then
+    echo -e "${YELLOW}Resuming from first FAILED/BLOCKED construction...${NC}"
+    echo -e "${YELLOW}Negative knowledge in DOMAIN_CONTEXT.md is preserved.${NC}"
+    reset_failed_constructions
+  fi
 
   echo ""
   echo -e "${BOLD}${CYAN}======================================================${NC}"
@@ -849,11 +1075,15 @@ run_program() {
     case "$status" in
       "not started")
         update_construction_status "$spec_file" "Specified"
-        run_full "$spec_file" && update_construction_status "$spec_file" "Audited" || {
+        if run_full "$spec_file"; then
+          update_construction_status "$spec_file" "Audited"
+          register_proved_theorem "$spec_file"
+        else
           echo -e "${RED}Construction failed for $spec_file${NC}"
-          update_construction_status "$spec_file" "Revision"
+          update_construction_status "$spec_file" "Blocked"
+          mark_downstream_blocked "$spec_file"
           continue
-        }
+        fi
         ;;
       "specified")
         # Skip survey+specify, start from construct
@@ -864,6 +1094,7 @@ run_program() {
         if [[ ! -f "REVISION.md" ]]; then
           run_log "$spec_file"
           update_construction_status "$spec_file" "Audited"
+          register_proved_theorem "$spec_file"
         else
           update_construction_status "$spec_file" "Revision"
         fi
@@ -875,6 +1106,18 @@ run_program() {
         if [[ ! -f "REVISION.md" ]]; then
           run_log "$spec_file"
           update_construction_status "$spec_file" "Audited"
+          register_proved_theorem "$spec_file"
+        else
+          update_construction_status "$spec_file" "Revision"
+        fi
+        ;;
+      "formalized")
+        run_prove "$spec_file"
+        run_audit "$spec_file"
+        if [[ ! -f "REVISION.md" ]]; then
+          run_log "$spec_file"
+          update_construction_status "$spec_file" "Audited"
+          register_proved_theorem "$spec_file"
         else
           update_construction_status "$spec_file" "Revision"
         fi
@@ -882,10 +1125,14 @@ run_program() {
       "revision")
         # Re-run full cycle
         update_construction_status "$spec_file" "Not started"
-        run_full "$spec_file" && update_construction_status "$spec_file" "Audited" || {
+        if run_full "$spec_file"; then
+          update_construction_status "$spec_file" "Audited"
+          register_proved_theorem "$spec_file"
+        else
           update_construction_status "$spec_file" "Blocked"
+          mark_downstream_blocked "$spec_file"
           continue
-        }
+        fi
         ;;
     esac
 
@@ -928,7 +1175,7 @@ case "${1:-help}" in
     echo ""
     echo "Pipelines:"
     echo "  full      <spec-file>    Run all 7 phases with revision loop"
-    echo "  program   [--max-cycles N]  Auto-advance through CONSTRUCTIONS.md"
+    echo "  program   [--max-cycles N] [--resume]  Auto-advance through CONSTRUCTIONS.md"
     echo ""
     echo "Utilities:"
     echo "  status                   Show sorry count, axiom count, build status"

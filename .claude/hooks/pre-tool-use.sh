@@ -56,6 +56,11 @@ if [[ "$TOOL" == "Bash" ]]; then
     echo "BLOCKED: Destructive git commands are not allowed during math phases." >&2
     exit 1
   fi
+  # R3.4: lake clean is forbidden — olean caches must be preserved
+  if echo "$INPUT" | grep -qEi 'lake\s+clean'; then
+    echo "BLOCKED: 'lake clean' is forbidden. Olean caches must be preserved." >&2
+    exit 1
+  fi
   # Block axiom/unsafe/native_decide/admit in bash commands (e.g., echo >> file.lean)
   if echo "$INPUT" | grep -qEi '(\.lean|lakefile)' && echo "$INPUT" | grep -qEi '\b(axiom|unsafe|native_decide|admit)\b'; then
     echo "BLOCKED: Cannot inject axiom/unsafe/native_decide/admit via shell." >&2
@@ -148,12 +153,31 @@ case "$PHASE" in
         echo "BLOCKED: Spec files are read-only during PROVE phase." >&2
         exit 1
       fi
+      # R6.5: Block Write to DOMAIN_CONTEXT.md (only Edit append allowed)
+      if echo "$INPUT" | grep -qE 'DOMAIN_CONTEXT\.md'; then
+        echo "BLOCKED: Cannot overwrite DOMAIN_CONTEXT.md during PROVE. Use Edit to append." >&2
+        exit 1
+      fi
     fi
     if [[ "$TOOL" == "Edit" || "$TOOL" == "MultiEdit" ]]; then
-      # Block edits to spec files
+      # Block edits to spec files (but NOT DOMAIN_CONTEXT.md — R6.5 allows append)
       if echo "$INPUT" | grep -qE "$SPEC_PATTERN"; then
-        echo "BLOCKED: Spec files are read-only during PROVE phase." >&2
-        exit 1
+        # Allow edits to DOMAIN_CONTEXT.md (for negative knowledge)
+        if ! echo "$INPUT" | grep -qE 'DOMAIN_CONTEXT\.md'; then
+          echo "BLOCKED: Spec files are read-only during PROVE phase." >&2
+          exit 1
+        fi
+      fi
+      # R2.4: Detect signature modification in .lean files
+      if echo "$INPUT" | grep -qE "$LEAN_PATTERN"; then
+        OLD_STR=$(echo "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('old_string',''))" 2>/dev/null || true)
+        if echo "$OLD_STR" | grep -qE '^\s*(theorem|lemma|def|structure|inductive)\s+' && \
+           ! echo "$OLD_STR" | grep -qE '\bsorry\b'; then
+          echo "BLOCKED: PROVE phase cannot modify theorem signatures or definitions." >&2
+          echo "   Only proof bodies (sorry replacements) are allowed." >&2
+          echo "   If the statement is wrong, create REVISION.md." >&2
+          exit 1
+        fi
       fi
     fi
     ;;

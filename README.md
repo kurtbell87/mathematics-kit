@@ -20,8 +20,9 @@ The installer will:
 2. Check for `lake` / `elan` toolchain
 3. Initialize a Lean4+Mathlib project if no lakefile exists
 4. Run `lake update` to fetch Mathlib
-5. Verify `lake build` succeeds
-6. Create `specs/` and `results/` directories
+5. **Mathlib build caching**: Detects Mathlib dependency, checks toolchain version match, runs `lake exe cache get` for precompiled oleans
+6. Verify `lake build` succeeds (incremental after cache)
+7. Create `specs/` and `results/` directories
 
 ## 7-Phase Pipeline
 
@@ -74,9 +75,10 @@ Runs all 7 phases with automatic revision loop support.
 # Edit CONSTRUCTIONS.md with your construction queue
 ./math.sh program
 ./math.sh program --max-cycles 10
+./math.sh program --resume   # Resume from first FAILED/BLOCKED construction
 ```
 
-Auto-advances through constructions listed in `CONSTRUCTIONS.md`.
+Auto-advances through constructions listed in `CONSTRUCTIONS.md`. Supports dependency chains via the `Depends On` column — constructions are executed in topological order, and downstream constructions are automatically blocked when dependencies fail.
 
 ### Utilities
 ```bash
@@ -120,6 +122,8 @@ If the PROVE or AUDIT phase discovers the construction is unprovable, the agent 
 
 The `full` pipeline automatically handles up to `MAX_REVISIONS` (default: 3) revision cycles. Previous attempts are archived in `results/revisions/`.
 
+Errors are classified automatically (TYPE_MISMATCH, UNKNOWN_IDENT, TACTIC_FAIL, TIMEOUT, UNIVERSE_INCOMPAT) to guide the prover agent's strategy. Failed approaches are recorded in `DOMAIN_CONTEXT.md` under `## DOES NOT APPLY` to prevent re-attempting known-bad strategies across revision cycles.
+
 ## Configuration
 
 Environment variables:
@@ -134,6 +138,20 @@ Environment variables:
 | `MATH_AUTO_MERGE` | `false` | Auto-merge PR after creation |
 | `MATH_BASE_BRANCH` | `main` | Base branch for PRs |
 
+## Utility Scripts
+
+| Script | Description |
+|--------|-------------|
+| `scripts/mathlib-search.sh` | Search Mathlib source tree for definitions, theorems, and typeclasses |
+| `scripts/lean-error-classify.sh` | Classify Lean4 build errors (TYPE_MISMATCH, UNKNOWN_IDENT, TACTIC_FAIL, TIMEOUT, UNIVERSE_INCOMPAT) |
+| `scripts/lean-error-summarize.sh` | Condense Lean4 build errors — strips type expansions, extracts goals, caps at 40 lines |
+| `scripts/lake-timed.sh` | `lake` wrapper that records build timing to `lake-timing.jsonl` |
+| `scripts/resolve-deps.py` | Topological sort of construction dependencies from CONSTRUCTIONS.md |
+
+## Metrics
+
+After a full pipeline run, `results/metrics.jsonl` contains per-phase timing data and `results/lake-timing.jsonl` contains per-build timing. A summary table is printed at the end of `./math.sh full`.
+
 ## File Structure
 
 ```
@@ -141,16 +159,24 @@ your-project/
 ├── math.sh                           # Main orchestrator
 ├── math-aliases.sh                   # Shell aliases
 ├── CLAUDE.md                         # Workflow instructions for Claude
-├── CONSTRUCTIONS.md                  # Program-mode queue
+├── CONSTRUCTIONS.md                  # Program-mode queue (with dependency chains)
 ├── CONSTRUCTION_LOG.md               # Audit trail
-├── DOMAIN_CONTEXT.md                 # Domain knowledge + Mathlib mappings
+├── DOMAIN_CONTEXT.md                 # Domain knowledge + Mathlib mappings + negative knowledge
 ├── specs/                            # Spec & construction docs
 │   ├── my-construction.md
 │   └── construction-my-construction.md
 ├── results/                          # Archived results
-│   └── my-construction/
+│   ├── my-construction/
+│   ├── metrics.jsonl                 # Phase timing data
+│   ├── lake-timing.jsonl             # Build timing data
+│   └── revision-metrics.json         # Revision cycle tracking
 ├── scripts/
-│   └── math-watch.py                 # Live monitoring
+│   ├── math-watch.py                 # Live monitoring
+│   ├── mathlib-search.sh             # Mathlib source search
+│   ├── lean-error-classify.sh        # Error classifier
+│   ├── lean-error-summarize.sh       # Error summarizer
+│   ├── lake-timed.sh                 # Timed lake wrapper
+│   └── resolve-deps.py              # Dependency resolver
 ├── templates/
 │   └── construction-spec.md          # Spec template
 ├── .claude/
