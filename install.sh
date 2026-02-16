@@ -162,6 +162,7 @@ upgrade_machinery_executable "$KIT_DIR/scripts/lean-error-summarize.sh" "$TARGET
 upgrade_machinery_executable "$KIT_DIR/scripts/lake-timed.sh"           "$TARGET_DIR/scripts/lake-timed.sh"
 upgrade_machinery_executable "$KIT_DIR/scripts/lake-summarized.sh"      "$TARGET_DIR/scripts/lake-summarized.sh"
 upgrade_machinery_executable "$KIT_DIR/scripts/enumerate-sorrys.sh"    "$TARGET_DIR/scripts/enumerate-sorrys.sh"
+upgrade_machinery_executable "$KIT_DIR/scripts/context-checkpoint.sh"  "$TARGET_DIR/scripts/context-checkpoint.sh"
 upgrade_machinery            "$KIT_DIR/scripts/batch-sorrys.py"        "$TARGET_DIR/scripts/batch-sorrys.py"
 upgrade_machinery_executable "$KIT_DIR/scripts/mathlib-lint.sh"        "$TARGET_DIR/scripts/mathlib-lint.sh"
 upgrade_machinery            "$KIT_DIR/scripts/resolve-deps.py"        "$TARGET_DIR/scripts/resolve-deps.py"

@@ -107,6 +107,19 @@ This prevents future revision cycles from re-attempting known-bad approaches.
 
 **IMPORTANT**: You may ONLY append to the `## DOES NOT APPLY` section of DOMAIN_CONTEXT.md. Do not modify any other section.
 
+## Context Window Management
+
+Before each tool call, check: `ls $MATH_LOG_DIR/.checkpoint-requested 2>/dev/null`
+
+If the checkpoint file exists:
+1. Stop proving immediately.
+2. Write a progress summary to `results/prove-checkpoint.md`:
+   - Theorems proved so far
+   - Theorems attempted but failed (with brief reason)
+   - Remaining sorrys not yet attempted
+   - DOMAIN_CONTEXT.md DOES NOT APPLY entries added
+3. Exit cleanly. The orchestrator will restart with your summary.
+
 ## When to Create REVISION.md
 Create `REVISION.md` if:
 - A theorem statement is provably false (you can show a counterexample)

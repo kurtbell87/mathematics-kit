@@ -513,6 +513,13 @@ run_formalize() {
   start_phase_timer
   ensure_hooks_executable
 
+  # T3: Start checkpoint monitor
+  local checkpoint_pid=""
+  if [[ -x "./scripts/context-checkpoint.sh" ]]; then
+    ./scripts/context-checkpoint.sh "$MATH_PHASE" --threshold 40 &
+    checkpoint_pid=$!
+  fi
+
   local exit_code=0
   claude \
     --output-format stream-json \
@@ -529,6 +536,13 @@ Read the spec and construction docs, then write .lean files with ALL proof bodie
     --allowed-tools "Read,Write,Edit,Bash,Glob,Grep" \
     -p "Read the spec and construction docs, then write Lean4 files with definitions and sorry theorems. Verify with '$LAKE_BUILD'." \
     > "$MATH_LOG_DIR/formalize.log" 2>&1 || exit_code=$?
+
+  # T3: Stop checkpoint monitor
+  if [[ -n "$checkpoint_pid" ]]; then
+    kill "$checkpoint_pid" 2>/dev/null || true
+    wait "$checkpoint_pid" 2>/dev/null || true
+  fi
+  rm -f "$MATH_LOG_DIR/.checkpoint-requested"
 
   _phase_summary "formalize" "$exit_code"
   end_phase_timer "formalize"
@@ -574,6 +588,23 @@ run_prove_monolithic() {
   # Unlock specs on exit
   trap "unlock_spec '$spec_file' 2>/dev/null || true" EXIT
 
+  # T3: Start checkpoint monitor
+  local checkpoint_pid=""
+  if [[ -x "./scripts/context-checkpoint.sh" ]]; then
+    ./scripts/context-checkpoint.sh "$MATH_PHASE" --threshold 40 &
+    checkpoint_pid=$!
+  fi
+
+  # T3: Inject checkpoint context if resuming from a previous checkpoint
+  local checkpoint_context=""
+  if [[ -n "${PROVE_CHECKPOINT:-}" && -f "${PROVE_CHECKPOINT}" ]]; then
+    checkpoint_context="
+## Checkpoint Recovery
+Continuation of a previous session. Previous summary:
+$(cat "$PROVE_CHECKPOINT")
+Start from where the previous session left off. Do NOT re-attempt theorems listed as failed."
+  fi
+
   local exit_code=0
   claude \
     --output-format stream-json \
@@ -589,14 +620,34 @@ run_prove_monolithic() {
 - Lake timed build: ./scripts/lake-timed.sh build (records build timing)
 - Current sorry count: $sorry_count
 - .lean files: $(find_lean_files | wc -l | tr -d ' ') .lean file(s) (use Glob '**/*.lean' to discover)
+${checkpoint_context}
 
 Read the .lean files and spec. Replace sorrys with real proofs using Edit. Run '$LAKE_BUILD' after each change." \
     --allowed-tools "Read,Edit,Bash,Glob,Grep,Write" \
     -p "Fill in all sorry placeholders with real Lean4 proofs. Use Edit to replace sorry. Run '$LAKE_BUILD' after each change. Current sorry count: $sorry_count" \
     > "$MATH_LOG_DIR/prove.log" 2>&1 || exit_code=$?
 
+  # T3: Stop checkpoint monitor
+  if [[ -n "$checkpoint_pid" ]]; then
+    kill "$checkpoint_pid" 2>/dev/null || true
+    wait "$checkpoint_pid" 2>/dev/null || true
+  fi
+
   _phase_summary "prove" "$exit_code"
   end_phase_timer "prove"
+
+  # T3: Checkpoint recovery — restart if context pressure triggered checkpoint
+  if [[ -f "$MATH_LOG_DIR/.checkpoint-requested" ]]; then
+    echo -e "${YELLOW}CHECKPOINT: Agent checkpointed due to context pressure.${NC}"
+    rm -f "$MATH_LOG_DIR/.checkpoint-requested"
+    local remaining
+    remaining=$(count_sorrys)
+
+    if [[ "$remaining" -gt 0 && -f "results/prove-checkpoint.md" ]]; then
+      echo -e "${YELLOW}Restarting prove phase with checkpoint context...${NC}"
+      PROVE_CHECKPOINT="results/prove-checkpoint.md" run_prove_monolithic "$spec_file"
+    fi
+  fi
 }
 
 run_prove_chunked() {
@@ -772,6 +823,13 @@ run_polish() {
   # Unlock specs and clean scratch on exit
   trap "unlock_spec '$spec_file' 2>/dev/null || true; rm -f scratch/lint_check.lean 2>/dev/null || true" EXIT
 
+  # T3: Start checkpoint monitor
+  local checkpoint_pid=""
+  if [[ -x "./scripts/context-checkpoint.sh" ]]; then
+    ./scripts/context-checkpoint.sh "$MATH_PHASE" --threshold 40 &
+    checkpoint_pid=$!
+  fi
+
   local exit_code=0
   claude \
     --output-format stream-json \
@@ -791,6 +849,13 @@ Read the .lean files, apply Mathlib style fixes, run #lint, flag naming issues. 
     --allowed-tools "Read,Edit,Write,Bash,Glob,Grep" \
     -p "Polish all .lean files for Mathlib style compliance: add doc strings, module docstrings, copyright headers, fix formatting. Run '$LAKE_BUILD' after each change. Run #lint via scratch/lint_check.lean. Flag naming issues in CONSTRUCTION_LOG.md." \
     > "$MATH_LOG_DIR/polish.log" 2>&1 || exit_code=$?
+
+  # T3: Stop checkpoint monitor
+  if [[ -n "$checkpoint_pid" ]]; then
+    kill "$checkpoint_pid" 2>/dev/null || true
+    wait "$checkpoint_pid" 2>/dev/null || true
+  fi
+  rm -f "$MATH_LOG_DIR/.checkpoint-requested"
 
   _phase_summary "polish" "$exit_code"
   end_phase_timer "polish"
