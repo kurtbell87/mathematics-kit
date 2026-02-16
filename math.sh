@@ -534,7 +534,7 @@ Read the spec and construction docs, then write .lean files with ALL proof bodie
   end_phase_timer "formalize"
 }
 
-run_prove() {
+run_prove_monolithic() {
   local spec_file="${1:?Usage: math.sh prove <spec-file>}"
 
   if [[ ! -f "$spec_file" ]]; then
@@ -597,6 +597,140 @@ Read the .lean files and spec. Replace sorrys with real proofs using Edit. Run '
 
   _phase_summary "prove" "$exit_code"
   end_phase_timer "prove"
+}
+
+run_prove_chunked() {
+  local spec_file="${1:?Usage: math.sh prove <spec-file>}"
+
+  if [[ ! -f "$spec_file" ]]; then
+    echo -e "${RED}Error: Spec file not found: $spec_file${NC}" >&2
+    exit 1
+  fi
+
+  validate_build_env || exit 1
+
+  local lean_count
+  lean_count=$(find_lean_files | wc -l | tr -d ' ')
+  if [[ "$lean_count" -eq 0 ]]; then
+    echo -e "${RED}Error: No .lean files found. Run 'math.sh formalize' first.${NC}" >&2
+    exit 1
+  fi
+
+  echo ""
+  echo -e "${GREEN}======================================================${NC}"
+  echo -e "${GREEN}  PROVE PHASE (CHUNKED) -- Per-Batch Sorry Elimination${NC}"
+  echo -e "${GREEN}======================================================${NC}"
+  echo -e "  Spec:    $spec_file ${YELLOW}(READ-ONLY)${NC}"
+  echo -e "  Build:   $LAKE_BUILD"
+  echo ""
+
+  lock_spec "$spec_file"
+  ensure_hooks_executable
+  export MATH_PHASE="prove"
+  start_phase_timer
+
+  trap "unlock_spec '$spec_file' 2>/dev/null || true" EXIT
+
+  # Step 1: Enumerate and batch sorrys
+  echo -e "${CYAN}Enumerating sorrys...${NC}"
+  local sorry_data
+  sorry_data=$(./scripts/enumerate-sorrys.sh "$LEAN_DIR")
+  local total_sorrys
+  total_sorrys=$(echo "$sorry_data" | grep -c '.' || echo 0)
+  echo -e "  Found ${BOLD}${total_sorrys}${NC} sorry(s)"
+
+  if [[ "$total_sorrys" -eq 0 ]]; then
+    echo -e "${GREEN}No sorrys to prove!${NC}"
+    end_phase_timer "prove"
+    return 0
+  fi
+
+  local batches
+  batches=$(echo "$sorry_data" | python3 scripts/batch-sorrys.py --batch-size 5)
+  local batch_count
+  batch_count=$(echo "$batches" | grep -c '.' || echo 0)
+  echo -e "  Organized into ${BOLD}${batch_count}${NC} batch(es)"
+  echo ""
+
+  # Step 2: Process each batch as a fresh sub-agent
+  local batch_num=0
+
+  while IFS= read -r batch_json; do
+    batch_num=$((batch_num + 1))
+    local batch_files
+    batch_files=$(echo "$batch_json" | python3 -c "import json,sys; [print(f) for f in json.load(sys.stdin)['files']]")
+    local batch_sorrys
+    batch_sorrys=$(echo "$batch_json" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['sorrys']))")
+    local batch_theorems
+    batch_theorems=$(echo "$batch_json" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+for s in d['sorrys']:
+    print(f\"  - {s['theorem']} ({s['file']}:{s['line']})\")
+")
+
+    echo -e "${GREEN}── Batch $batch_num/$batch_count ($batch_sorrys sorrys) ──${NC}"
+    echo "$batch_theorems"
+    echo ""
+
+    local file_list
+    file_list=$(echo "$batch_files" | tr '\n' ', ')
+
+    local exit_code=0
+    claude \
+      --output-format stream-json \
+      --max-turns 25 \
+      --append-system-prompt "$(cat "$PROMPT_DIR/math-prove.md")
+
+## Context (Batch $batch_num/$batch_count)
+- Spec: $spec_file (READ-ONLY)
+- Target files: $file_list
+- Domain context: DOMAIN_CONTEXT.md (append-only: DOES NOT APPLY section)
+- Build: $LAKE_BUILD
+- Sorrys in this batch: $batch_sorrys
+
+## Batch Targets
+$batch_theorems
+
+Focus ONLY on the sorrys listed above. Do not attempt sorrys in other files/batches.
+Replace each sorry with a real proof using Edit. Run the build command after each change.
+If a theorem is unprovable after 5 attempts, record it in DOMAIN_CONTEXT.md and move on." \
+      --allowed-tools "Read,Edit,Bash,Glob,Grep,Write" \
+      -p "Prove the following sorrys (batch $batch_num/$batch_count). Focus only on these targets:
+$batch_theorems
+
+Replace each sorry with a real proof using Edit. Run the build command after each change." \
+      > "$MATH_LOG_DIR/prove-batch-${batch_num}.log" 2>&1 || exit_code=$?
+
+    _phase_summary "prove-batch-${batch_num}" "$exit_code"
+    echo ""
+  done <<< "$batches"
+
+  # Step 3: Final verification build
+  echo -e "${CYAN}Final verification build...${NC}"
+  local final_sorrys
+  final_sorrys=$(count_sorrys)
+  echo -e "  Remaining sorrys: ${BOLD}${final_sorrys}${NC}"
+
+  if [[ "$final_sorrys" -gt 0 ]]; then
+    echo -e "${YELLOW}Not all sorrys eliminated. ${final_sorrys} remain.${NC}"
+  else
+    echo -e "${GREEN}All sorrys eliminated!${NC}"
+  fi
+
+  eval "$LAKE_BUILD" > "$MATH_LOG_DIR/prove-final-build.log" 2>&1 || true
+
+  end_phase_timer "prove"
+}
+
+run_prove() {
+  local spec_file="${1:?Usage: math.sh prove <spec-file>}"
+
+  if [[ -x "./scripts/enumerate-sorrys.sh" ]] && [[ -f "scripts/batch-sorrys.py" ]]; then
+    run_prove_chunked "$spec_file"
+  else
+    run_prove_monolithic "$spec_file"
+  fi
 }
 
 run_polish() {
@@ -1287,7 +1421,15 @@ case "${1:-help}" in
   specify)    shift; run_specify "$@" ;;
   construct)  shift; run_construct "$@" ;;
   formalize)  shift; run_formalize "$@" ;;
-  prove)      shift; run_prove "$@" ;;
+  prove)
+    shift
+    if [[ "${1:-}" == "--monolithic" ]]; then
+      shift
+      run_prove_monolithic "$@"
+    else
+      run_prove "$@"
+    fi
+    ;;
   polish)     shift; run_polish "$@" ;;
   audit)      shift; run_audit "$@" ;;
   log)        shift; run_log "$@" ;;
