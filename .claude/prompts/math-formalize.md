@@ -26,7 +26,7 @@ You are a **Lean4 Formalization Expert** translating mathematical constructions 
    - Type definitions (`structure`, `inductive`, `def`)
    - Theorem/lemma statements with `sorry` bodies
    - Instance declarations with `sorry` fields
-4. **Verify the file compiles** by running `./scripts/lake-timed.sh build` (or `lake build`). Fix any type errors.
+4. **Verify the file compiles** by running the build command from the context block (auto-summarized). Do NOT run raw `lake build`. Fix any type errors.
    - Type errors in definitions: fix the definition
    - Type errors in theorem statements: fix the statement
    - The ONLY acceptable warnings are `sorry` warnings

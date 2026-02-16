@@ -160,6 +160,7 @@ upgrade_machinery_executable "$KIT_DIR/scripts/mathlib-search.sh"       "$TARGET
 upgrade_machinery_executable "$KIT_DIR/scripts/lean-error-classify.sh"  "$TARGET_DIR/scripts/lean-error-classify.sh"
 upgrade_machinery_executable "$KIT_DIR/scripts/lean-error-summarize.sh" "$TARGET_DIR/scripts/lean-error-summarize.sh"
 upgrade_machinery_executable "$KIT_DIR/scripts/lake-timed.sh"           "$TARGET_DIR/scripts/lake-timed.sh"
+upgrade_machinery_executable "$KIT_DIR/scripts/lake-summarized.sh"      "$TARGET_DIR/scripts/lake-summarized.sh"
 upgrade_machinery_executable "$KIT_DIR/scripts/mathlib-lint.sh"        "$TARGET_DIR/scripts/mathlib-lint.sh"
 upgrade_machinery            "$KIT_DIR/scripts/resolve-deps.py"        "$TARGET_DIR/scripts/resolve-deps.py"
 

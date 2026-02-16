@@ -69,10 +69,7 @@ Common tactics to use:
 
 ## Handling Build Errors
 
-When `lake build` fails:
-1. **First**: Run `lake build 2>&1 | ./scripts/lean-error-summarize.sh` to get a condensed view
-2. **If the summary is insufficient**: Read the raw error output
-3. **If the error is opaque**: Generate a minimal failing example (see below)
+The build command (`$LAKE_BUILD`) auto-summarizes errors. You will see classified, condensed output — never raw Mathlib type expansions. If the summary is insufficient to diagnose the issue, generate an MWE (see below). Do NOT run raw `lake build` directly — always use the build command provided in the context block.
 
 ## Minimal Failing Examples (MWE)
 

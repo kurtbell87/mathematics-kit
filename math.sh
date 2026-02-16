@@ -29,8 +29,8 @@ RESULTS_DIR="${RESULTS_DIR:-results}"              # Archived results
 PROMPT_DIR=".claude/prompts"                       # Phase-specific prompt files
 HOOK_DIR=".claude/hooks"                           # Hook scripts
 
-# Lean4 build command
-LAKE_BUILD="${LAKE_BUILD:-lake build}"
+# Lean4 build command (default: summarized wrapper that auto-condenses errors)
+LAKE_BUILD="${LAKE_BUILD:-./scripts/lake-summarized.sh build}"
 
 # Revision limits
 MAX_REVISIONS="${MAX_REVISIONS:-3}"                # Max revision cycles before giving up
@@ -95,6 +95,11 @@ validate_build_env() {
     echo -e "The Lean4 toolchain may be misconfigured." >&2
     echo -e "Try: elan default leanprover/lean4:stable" >&2
     return 1
+  fi
+  # T1: Ensure summarized wrapper exists; fall back to raw lake build if missing
+  if [[ ! -x "./scripts/lake-summarized.sh" ]]; then
+    echo -e "${YELLOW}Warning: lake-summarized.sh not found. Using raw lake build.${NC}" >&2
+    LAKE_BUILD="lake build"
   fi
 }
 

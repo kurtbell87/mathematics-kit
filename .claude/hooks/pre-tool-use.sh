@@ -119,6 +119,14 @@ case "$PHASE" in
 
   # ── FORMALIZE: Write .lean files, but ALL proof bodies must be sorry. ──
   formalize)
+    # T1: Block raw lake build — force use of summarized wrapper
+    if [[ "$TOOL" == "Bash" ]]; then
+      if echo "$INPUT" | grep -qEi '^\s*lake\s+build' && ! echo "$INPUT" | grep -qEi 'lake-summarized'; then
+        echo "BLOCKED: Use the build command from context (\$LAKE_BUILD) instead of raw 'lake build'." >&2
+        echo "   The summarized wrapper saves context window tokens." >&2
+        exit 1
+      fi
+    fi
     if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" || "$TOOL" == "MultiEdit" ]]; then
       # Block writes to spec files
       if echo "$INPUT" | grep -qE "$SPEC_PATTERN"; then
@@ -142,6 +150,14 @@ case "$PHASE" in
 
   # ── PROVE: Edit-only for .lean files. Cannot touch signatures/definitions. ──
   prove)
+    # T1: Block raw lake build — force use of summarized wrapper
+    if [[ "$TOOL" == "Bash" ]]; then
+      if echo "$INPUT" | grep -qEi '^\s*lake\s+build' && ! echo "$INPUT" | grep -qEi 'lake-summarized'; then
+        echo "BLOCKED: Use the build command from context (\$LAKE_BUILD) instead of raw 'lake build'." >&2
+        echo "   The summarized wrapper saves context window tokens." >&2
+        exit 1
+      fi
+    fi
     if [[ "$TOOL" == "Write" ]]; then
       if echo "$INPUT" | grep -qE "$LEAN_PATTERN"; then
         echo "BLOCKED: PROVE phase uses Edit (not Write) for .lean files." >&2
