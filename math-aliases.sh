@@ -9,6 +9,7 @@
 #   math-construct specs/my-construction.md
 #   math-formalize specs/my-construction.md
 #   math-prove specs/my-construction.md
+#   math-polish specs/my-construction.md
 #   math-audit specs/my-construction.md
 #   math-log specs/my-construction.md
 #   math-full specs/my-construction.md
@@ -24,6 +25,7 @@ alias math-specify='bash $MATH_SCRIPT specify'
 alias math-construct='bash $MATH_SCRIPT construct'
 alias math-formalize='bash $MATH_SCRIPT formalize'
 alias math-prove='bash $MATH_SCRIPT prove'
+alias math-polish='bash $MATH_SCRIPT polish'
 alias math-audit='bash $MATH_SCRIPT audit'
 alias math-log='bash $MATH_SCRIPT log'
 alias math-full='bash $MATH_SCRIPT full'

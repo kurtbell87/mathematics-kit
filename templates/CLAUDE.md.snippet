@@ -1,9 +1,9 @@
 # Claude Mathematics Kit — Workflow Instructions
 
-## 7-Phase Pipeline
+## 8-Phase Pipeline
 This project uses a formal mathematics verification pipeline:
 ```
-SURVEY → SPECIFY → CONSTRUCT → FORMALIZE → PROVE → AUDIT → LOG
+SURVEY → SPECIFY → CONSTRUCT → FORMALIZE → PROVE → POLISH → AUDIT → LOG
 ```
 
 ## Phase Rules (MUST follow)
@@ -37,6 +37,14 @@ SURVEY → SPECIFY → CONSTRUCT → FORMALIZE → PROVE → AUDIT → LOG
 - Record failed approaches in DOMAIN_CONTEXT.md under `## DOES NOT APPLY`
 - Generate MWEs in `scratch/MWE.lean` for opaque errors
 - Create `REVISION.md` if construction is unprovable
+
+### POLISH (style compliance)
+- Use **Edit** (not Write) on `.lean` files (except `scratch/*.lean`)
+- Add doc strings, module docstrings, copyright headers
+- Fix formatting: line length, `Type*`, `fun` not `λ`
+- Run `#lint` via `scratch/lint_check.lean`
+- Flag naming convention violations in `CONSTRUCTION_LOG.md` (do NOT rename)
+- Do NOT modify proof bodies or signatures
 
 ### AUDIT (read-only for .lean)
 - All `.lean` files are READ-ONLY
@@ -74,9 +82,11 @@ After each significant action, update CONSTRUCTION_LOG.md with progress notes.
 - `DOMAIN_CONTEXT.md` — Mathlib mappings, domain knowledge, and negative knowledge (DOES NOT APPLY)
 - `CONSTRUCTION_LOG.md` — audit trail
 - `CONSTRUCTIONS.md` — program-mode construction queue (with dependency chains)
+- `STYLE_GUIDE.md` — Mathlib4 style & review standards reference
 
 ## Utility Scripts
 - `scripts/mathlib-search.sh` — search Mathlib source for defs/thms/instances
 - `scripts/lean-error-classify.sh` — classify Lean4 errors (TYPE_MISMATCH, UNKNOWN_IDENT, etc.)
 - `scripts/lean-error-summarize.sh` — condense Lean4 errors for agent consumption
 - `scripts/lake-timed.sh` — `lake` wrapper that records build timing
+- `scripts/mathlib-lint.sh` — standalone Mathlib style checker (copyright, docstrings, line length)

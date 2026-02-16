@@ -24,13 +24,14 @@ The installer will:
 6. Verify `lake build` succeeds (incremental after cache)
 7. Create `specs/` and `results/` directories
 
-## 7-Phase Pipeline
+## 8-Phase Pipeline
 
 ```
-SURVEY → SPECIFY → CONSTRUCT → FORMALIZE → PROVE → AUDIT → LOG
-  │         │          │           │          │        │      │
-  │         │          │           │          │        │      └─ git commit + PR
-  │         │          │           │          │        └─ .lean files LOCKED, review coverage
+SURVEY → SPECIFY → CONSTRUCT → FORMALIZE → PROVE → POLISH → AUDIT → LOG
+  │         │          │           │          │        │        │      │
+  │         │          │           │          │        │        │      └─ git commit + PR
+  │         │          │           │          │        │        └─ .lean files LOCKED, review coverage
+  │         │          │           │          │        └─ Mathlib style compliance (doc strings, #lint)
   │         │          │           │          └─ spec LOCKED, fill in sorrys via lake build loop
   │         │          │           └─ write .lean defs + theorems (all sorry)
   │         │          └─ informal math: definitions, theorems, proof sketches
@@ -47,6 +48,7 @@ SURVEY → SPECIFY → CONSTRUCT → FORMALIZE → PROVE → AUDIT → LOG
 | **CONSTRUCT** | Mathematician | `specs/construction-*.md` | specs, domain context | No `.lean` code |
 | **FORMALIZE** | Lean4 Expert | `.lean` files (all `sorry`) | specs, construction docs | No real proofs |
 | **PROVE** | Proof Engineer | `.lean` proofs (Edit only) | specs (locked), `.lean` | Spec is `chmod 444` |
+| **POLISH** | Style Expert | `.lean` docs/formatting (Edit only) | `.lean`, `STYLE_GUIDE.md` | No proof/signature changes |
 | **AUDIT** | Auditor | `CONSTRUCTION_LOG.md`, `REVISION.md` | everything (locked) | `.lean` files `chmod 444` |
 | **LOG** | — | git commit + PR | — | — |
 
@@ -59,6 +61,7 @@ SURVEY → SPECIFY → CONSTRUCT → FORMALIZE → PROVE → AUDIT → LOG
 ./math.sh construct specs/my-construction.md
 ./math.sh formalize specs/my-construction.md
 ./math.sh prove     specs/my-construction.md
+./math.sh polish    specs/my-construction.md
 ./math.sh audit     specs/my-construction.md
 ./math.sh log       specs/my-construction.md
 ```
@@ -68,7 +71,7 @@ SURVEY → SPECIFY → CONSTRUCT → FORMALIZE → PROVE → AUDIT → LOG
 ./math.sh full specs/my-construction.md
 ```
 
-Runs all 7 phases with automatic revision loop support.
+Runs all 8 phases with automatic revision loop support.
 
 ### Program Mode
 ```bash
@@ -114,6 +117,7 @@ This is intentional — it prevents `lake build` verbosity and Lean4 type expans
 ### Aliases
 ```bash
 source math-aliases.sh
+math-polish specs/my-construction.md  # Mathlib style compliance
 math-status                         # Quick status
 math-sorrys                         # Sorry count per file
 math-axioms                         # Scan for axiom/unsafe/native_decide
@@ -170,6 +174,7 @@ Environment variables:
 | `scripts/lean-error-classify.sh` | Classify Lean4 build errors (TYPE_MISMATCH, UNKNOWN_IDENT, TACTIC_FAIL, TIMEOUT, UNIVERSE_INCOMPAT) |
 | `scripts/lean-error-summarize.sh` | Condense Lean4 build errors — strips type expansions, extracts goals, caps at 40 lines |
 | `scripts/lake-timed.sh` | `lake` wrapper that records build timing to `lake-timing.jsonl` |
+| `scripts/mathlib-lint.sh` | Standalone Mathlib style checker (copyright, docstrings, line length, formatting) |
 | `scripts/resolve-deps.py` | Topological sort of construction dependencies from CONSTRUCTIONS.md |
 
 ## Metrics
@@ -213,6 +218,7 @@ your-project/
 │       ├── math-construct.md
 │       ├── math-formalize.md
 │       ├── math-prove.md
+│       ├── math-polish.md
 │       └── math-audit.md
 └── lakefile.lean                     # Lean4 project config
 ```

@@ -47,6 +47,12 @@ You are a **Verification Auditor** performing a final review of the formalized m
 [ ] Definitions match spec intent
 [ ] Proofs use sound tactics
 [ ] Success criteria met
+[ ] Copyright headers present on all .lean files
+[ ] Module docstrings present on all .lean files
+[ ] Doc strings on all defs/structures/classes/instances
+[ ] Line length <= 100 characters
+[ ] `Type*` used (not `Type _`)
+[ ] `#lint` passes (run via scratch/lint_check.lean)
 ```
 
 ## CONSTRUCTION_LOG.md Format
@@ -70,6 +76,15 @@ You are a **Verification Auditor** performing a final review of the formalized m
 | Name | Type | Matches Spec |
 |------|------|-------------|
 | ...  | ...  | YES/NO      |
+
+## Style Compliance
+- Copyright headers: PASS/FAIL
+- Module docstrings: PASS/FAIL
+- Doc strings on all defs: PASS/FAIL
+- Line length <= 100: PASS/FAIL
+- `Type*` (not `Type _`): PASS/FAIL
+- `#lint`: PASS/FAIL
+- Naming convention warnings: [list any flagged by POLISH phase]
 
 ## Verdict: PASS / FAIL / REVISION_NEEDED
 ## Notes

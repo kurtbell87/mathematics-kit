@@ -182,6 +182,50 @@ case "$PHASE" in
     fi
     ;;
 
+  # ── POLISH: Edit-only for .lean files. Cannot touch proofs or signatures. ──
+  polish)
+    if [[ "$TOOL" == "Write" ]]; then
+      if echo "$INPUT" | grep -qE "$LEAN_PATTERN"; then
+        # Allow Write to scratch/*.lean (for #lint)
+        if ! echo "$INPUT" | grep -qE 'scratch/'; then
+          echo "BLOCKED: POLISH phase uses Edit (not Write) for .lean files." >&2
+          echo "   Exception: scratch/*.lean files are allowed." >&2
+          exit 1
+        fi
+      fi
+      # Block writes to spec files
+      if echo "$INPUT" | grep -qE "$SPEC_PATTERN"; then
+        echo "BLOCKED: POLISH phase cannot modify spec files." >&2
+        exit 1
+      fi
+    fi
+    if [[ "$TOOL" == "Edit" || "$TOOL" == "MultiEdit" ]]; then
+      # Block edits to spec files (except DOMAIN_CONTEXT.md)
+      if echo "$INPUT" | grep -qE "$SPEC_PATTERN"; then
+        if ! echo "$INPUT" | grep -qE 'DOMAIN_CONTEXT\.md'; then
+          echo "BLOCKED: POLISH phase cannot modify spec files." >&2
+          exit 1
+        fi
+      fi
+      # Detect signature modification in .lean files
+      if echo "$INPUT" | grep -qE "$LEAN_PATTERN"; then
+        OLD_STR=$(echo "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('old_string',''))" 2>/dev/null || true)
+        if echo "$OLD_STR" | grep -qE '^\s*(theorem|lemma|def|structure|inductive)\s+' && \
+           ! echo "$OLD_STR" | grep -qE '\bsorry\b'; then
+          echo "BLOCKED: POLISH phase cannot modify signatures or definitions." >&2
+          echo "   Only documentation, formatting, and style changes are allowed." >&2
+          exit 1
+        fi
+        # Block proof body modification (detect tactic keywords in old_string)
+        if echo "$OLD_STR" | grep -qEi '\b(simp|ring|omega|linarith|nlinarith|norm_num|exact|apply|intro|intros|cases|rcases|obtain|induction|rw|rfl|ext|funext|constructor|push_neg|by_contra|contradiction|trivial|assumption|refine|field_simp|positivity|gcongr|decide|norm_cast|aesop|tauto|calc|specialize|use)\b'; then
+          echo "BLOCKED: POLISH phase cannot modify proof bodies." >&2
+          echo "   Only documentation, formatting, and style changes are allowed." >&2
+          exit 1
+        fi
+      fi
+    fi
+    ;;
+
   # ── AUDIT: All .lean files locked. Can only write log and revision. ──
   audit)
     if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" || "$TOOL" == "MultiEdit" ]]; then

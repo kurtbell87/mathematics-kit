@@ -160,6 +160,7 @@ upgrade_machinery_executable "$KIT_DIR/scripts/mathlib-search.sh"       "$TARGET
 upgrade_machinery_executable "$KIT_DIR/scripts/lean-error-classify.sh"  "$TARGET_DIR/scripts/lean-error-classify.sh"
 upgrade_machinery_executable "$KIT_DIR/scripts/lean-error-summarize.sh" "$TARGET_DIR/scripts/lean-error-summarize.sh"
 upgrade_machinery_executable "$KIT_DIR/scripts/lake-timed.sh"           "$TARGET_DIR/scripts/lake-timed.sh"
+upgrade_machinery_executable "$KIT_DIR/scripts/mathlib-lint.sh"        "$TARGET_DIR/scripts/mathlib-lint.sh"
 upgrade_machinery            "$KIT_DIR/scripts/resolve-deps.py"        "$TARGET_DIR/scripts/resolve-deps.py"
 
 # ──────────────────────────────────────────────────────────────
@@ -174,6 +175,7 @@ upgrade_machinery            "$KIT_DIR/.claude/prompts/math-specify.md"   "$TARG
 upgrade_machinery            "$KIT_DIR/.claude/prompts/math-construct.md" "$TARGET_DIR/.claude/prompts/math-construct.md"
 upgrade_machinery            "$KIT_DIR/.claude/prompts/math-formalize.md" "$TARGET_DIR/.claude/prompts/math-formalize.md"
 upgrade_machinery            "$KIT_DIR/.claude/prompts/math-prove.md"     "$TARGET_DIR/.claude/prompts/math-prove.md"
+upgrade_machinery            "$KIT_DIR/.claude/prompts/math-polish.md"    "$TARGET_DIR/.claude/prompts/math-polish.md"
 upgrade_machinery            "$KIT_DIR/.claude/prompts/math-audit.md"     "$TARGET_DIR/.claude/prompts/math-audit.md"
 
 # ── Settings (config) ──
@@ -388,6 +390,7 @@ echo -e "     ${BLUE}./math.sh specify specs/my-construction.md${NC}"
 echo -e "     ${BLUE}./math.sh construct specs/my-construction.md${NC}"
 echo -e "     ${BLUE}./math.sh formalize specs/my-construction.md${NC}"
 echo -e "     ${BLUE}./math.sh prove specs/my-construction.md${NC}"
+echo -e "     ${BLUE}./math.sh polish specs/my-construction.md${NC}"
 echo -e "     ${BLUE}./math.sh audit specs/my-construction.md${NC}"
 echo -e "     ${BLUE}./math.sh log specs/my-construction.md${NC}"
 echo -e "  5. Check status: ${BLUE}./math.sh status${NC}"

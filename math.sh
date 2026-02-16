@@ -7,9 +7,10 @@
 #   ./math.sh construct <spec-file>       # Informal math: definitions, theorems, proof sketches
 #   ./math.sh formalize <spec-file>       # Write .lean defs + theorems (all sorry)
 #   ./math.sh prove     <spec-file>       # Fill sorrys via lake build loop
+#   ./math.sh polish    <spec-file>       # Mathlib style compliance (doc strings, formatting, #lint)
 #   ./math.sh audit     <spec-file>       # Verify coverage, zero sorry/axiom
 #   ./math.sh log       <spec-file>       # Git commit + PR
-#   ./math.sh full      <spec-file>       # Run all 7 phases with revision loop
+#   ./math.sh full      <spec-file>       # Run all 8 phases with revision loop
 #   ./math.sh program   [--max-cycles N]  # Auto-advance through CONSTRUCTIONS.md
 #   ./math.sh status                      # Show sorry count, axiom count, build status
 #   ./math.sh watch     [phase]           # Live-tail a running phase log
@@ -593,6 +594,69 @@ Read the .lean files and spec. Replace sorrys with real proofs using Edit. Run '
   end_phase_timer "prove"
 }
 
+run_polish() {
+  local spec_file="${1:?Usage: math.sh polish <spec-file>}"
+
+  if [[ ! -f "$spec_file" ]]; then
+    echo -e "${RED}Error: Spec file not found: $spec_file${NC}" >&2
+    exit 1
+  fi
+
+  # R3.5: Validate build environment before agent starts
+  validate_build_env || exit 1
+
+  local lean_count
+  lean_count=$(find_lean_files | wc -l | tr -d ' ')
+  if [[ "$lean_count" -eq 0 ]]; then
+    echo -e "${RED}Error: No .lean files found. Run 'math.sh prove' first.${NC}" >&2
+    exit 1
+  fi
+
+  echo ""
+  echo -e "${MAGENTA}======================================================${NC}"
+  echo -e "${MAGENTA}  POLISH PHASE -- Mathlib Style Compliance${NC}"
+  echo -e "${MAGENTA}======================================================${NC}"
+  echo -e "  Spec:    $spec_file ${YELLOW}(READ-ONLY)${NC}"
+  echo -e "  Build:   $LAKE_BUILD"
+  echo ""
+
+  # OS-level enforcement: lock specs
+  lock_spec "$spec_file"
+  ensure_hooks_executable
+
+  # Ensure scratch directory exists for #lint
+  mkdir -p scratch
+
+  export MATH_PHASE="polish"
+  start_phase_timer
+
+  # Unlock specs and clean scratch on exit
+  trap "unlock_spec '$spec_file' 2>/dev/null || true; rm -f scratch/lint_check.lean 2>/dev/null || true" EXIT
+
+  local exit_code=0
+  claude \
+    --output-format stream-json \
+    --append-system-prompt "$(cat "$PROMPT_DIR/math-polish.md")
+
+## Context
+- Spec file: $spec_file (READ-ONLY -- OS-enforced, do not modify)
+- Construction docs: $(find "$SPEC_DIR" -name "construction-*" -type f 2>/dev/null | wc -l | tr -d ' ') construction doc(s) in $SPEC_DIR (use Glob to discover)
+- Domain context: DOMAIN_CONTEXT.md
+- Build command: $LAKE_BUILD
+- Style guide: STYLE_GUIDE.md (read sections 1-4 for reference)
+- Scratch directory: scratch/ (for lint_check.lean)
+- Construction log: CONSTRUCTION_LOG.md (write naming warnings here)
+- .lean files: $(find_lean_files | wc -l | tr -d ' ') .lean file(s) (use Glob '**/*.lean' to discover)
+
+Read the .lean files, apply Mathlib style fixes, run #lint, flag naming issues. Run '$LAKE_BUILD' after each change." \
+    --allowed-tools "Read,Edit,Write,Bash,Glob,Grep" \
+    -p "Polish all .lean files for Mathlib style compliance: add doc strings, module docstrings, copyright headers, fix formatting. Run '$LAKE_BUILD' after each change. Run #lint via scratch/lint_check.lean. Flag naming issues in CONSTRUCTION_LOG.md." \
+    > "$MATH_LOG_DIR/polish.log" 2>&1 || exit_code=$?
+
+  _phase_summary "polish" "$exit_code"
+  end_phase_timer "polish"
+}
+
 run_audit() {
   local spec_file="${1:?Usage: math.sh audit <spec-file>}"
 
@@ -690,7 +754,7 @@ Results: ${results_path}/
 Sorry count: $(count_sorrys)
 Axiom count: $(check_axioms)
 
-SURVEY -> SPECIFY -> CONSTRUCT -> FORMALIZE -> PROVE -> AUDIT complete."
+SURVEY -> SPECIFY -> CONSTRUCT -> FORMALIZE -> PROVE -> POLISH -> AUDIT complete."
 
   # Push and create PR
   git push -u origin "$branch"
@@ -711,6 +775,7 @@ SURVEY -> SPECIFY -> CONSTRUCT -> FORMALIZE -> PROVE -> AUDIT complete."
 - [x] CONSTRUCT — informal construction designed
 - [x] FORMALIZE — Lean4 definitions + sorry theorems
 - [x] PROVE — all sorrys eliminated
+- [x] POLISH — Mathlib style compliance
 - [x] AUDIT — verification & coverage check
 
 ### Verification
@@ -756,7 +821,7 @@ run_full() {
   mkdir -p "$RESULTS_DIR"
   echo '{"revisions":[]}' > "$revision_log"
 
-  echo -e "${BOLD}Running full construction cycle: SURVEY -> SPECIFY -> CONSTRUCT -> FORMALIZE -> PROVE -> AUDIT -> LOG${NC}"
+  echo -e "${BOLD}Running full construction cycle: SURVEY -> SPECIFY -> CONSTRUCT -> FORMALIZE -> PROVE -> POLISH -> AUDIT -> LOG${NC}"
   echo ""
 
   # SURVEY
@@ -779,7 +844,11 @@ run_full() {
 
     # PROVE
     run_prove "$spec_file"
-    echo -e "\n${YELLOW}--- Prove complete. Auditing... ---${NC}\n"
+    echo -e "\n${YELLOW}--- Prove complete. Polishing... ---${NC}\n"
+
+    # POLISH
+    run_polish "$spec_file"
+    echo -e "\n${YELLOW}--- Polish complete. Auditing... ---${NC}\n"
 
     # AUDIT
     run_audit "$spec_file"
@@ -833,7 +902,9 @@ with open('$revision_log', 'w') as f:
           run_formalize "$spec_file"
           echo -e "\n${YELLOW}--- Formalize complete. Proving... ---${NC}\n"
           run_prove "$spec_file"
-          echo -e "\n${YELLOW}--- Prove complete. Auditing... ---${NC}\n"
+          echo -e "\n${YELLOW}--- Prove complete. Polishing... ---${NC}\n"
+          run_polish "$spec_file"
+          echo -e "\n${YELLOW}--- Polish complete. Auditing... ---${NC}\n"
           run_audit "$spec_file"
           # Check again for revision
           if [[ -f "REVISION.md" ]]; then
@@ -1144,6 +1215,7 @@ run_program() {
         run_construct "$spec_file"
         run_formalize "$spec_file"
         run_prove "$spec_file"
+        run_polish "$spec_file"
         run_audit "$spec_file"
         if [[ ! -f "REVISION.md" ]]; then
           run_log "$spec_file"
@@ -1156,6 +1228,7 @@ run_program() {
       "constructed")
         run_formalize "$spec_file"
         run_prove "$spec_file"
+        run_polish "$spec_file"
         run_audit "$spec_file"
         if [[ ! -f "REVISION.md" ]]; then
           run_log "$spec_file"
@@ -1167,6 +1240,7 @@ run_program() {
         ;;
       "formalized")
         run_prove "$spec_file"
+        run_polish "$spec_file"
         run_audit "$spec_file"
         if [[ ! -f "REVISION.md" ]]; then
           run_log "$spec_file"
@@ -1209,6 +1283,7 @@ case "${1:-help}" in
   construct)  shift; run_construct "$@" ;;
   formalize)  shift; run_formalize "$@" ;;
   prove)      shift; run_prove "$@" ;;
+  polish)     shift; run_polish "$@" ;;
   audit)      shift; run_audit "$@" ;;
   log)        shift; run_log "$@" ;;
   full)       shift; run_full "$@" ;;
@@ -1224,11 +1299,12 @@ case "${1:-help}" in
     echo "  construct <spec-file>    Informal math: definitions, theorems, proof sketches"
     echo "  formalize <spec-file>    Write .lean defs + theorem stmts (all sorry)"
     echo "  prove     <spec-file>    Fill sorrys via lake build loop (spec locked)"
+    echo "  polish    <spec-file>    Mathlib style compliance (doc strings, formatting, #lint)"
     echo "  audit     <spec-file>    Verify coverage, zero sorry/axiom (.lean locked)"
     echo "  log       <spec-file>    Git commit + PR"
     echo ""
     echo "Pipelines:"
-    echo "  full      <spec-file>    Run all 7 phases with revision loop"
+    echo "  full      <spec-file>    Run all 8 phases with revision loop"
     echo "  program   [--max-cycles N] [--resume]  Auto-advance through CONSTRUCTIONS.md"
     echo ""
     echo "Utilities:"
